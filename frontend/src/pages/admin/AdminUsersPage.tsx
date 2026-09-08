@@ -8,10 +8,20 @@ import { useAdminUsers } from "@/hooks/useAdmin";
  * d'édition (Drawer) déclenché par ligne. */
 export function AdminUsersPage() {
   const [search, setSearch] = React.useState("");
+  // Débouncé séparément de `search` : sans ça, chaque frappe change la
+  // queryKey de useAdminUsers et tire une requête GET /admin/users --
+  // l'input reste réactif sur `search`, seule la requête attend une pause de
+  // frappe de 300ms sur `debouncedSearch`.
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [editingUserId, setEditingUserId] = React.useState<string | null>(null);
 
-  const usersQuery = useAdminUsers({ q: search, page, pageSize: 20 });
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const usersQuery = useAdminUsers({ q: debouncedSearch, page, pageSize: 20 });
   // Dérivé de la requête (jamais un instantané figé) : si une mutation dans
   // le drawer invalide la liste (ex: bascule Premium), l'utilisateur affiché
   // ici se met à jour automatiquement dès le refetch, sans état dupliqué.

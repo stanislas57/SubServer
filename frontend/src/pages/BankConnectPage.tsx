@@ -20,7 +20,10 @@ export function BankConnectPage() {
   const navigate = useNavigate();
   const bankConnectUrl = useBankConnectUrl();
   const syncTransactions = useSyncTransactions();
-  const bankStatus = useBankStatus();
+  // Gaté sur bank_connected : le bloc qui consomme bankStatus.data (L83+)
+  // ne s'affiche pas avant, inutile de tirer GET /bank/status à chaque
+  // visite de la page tant qu'aucune banque n'est connectée.
+  const bankStatus = useBankStatus(!!user?.bank_connected);
   const magneticRef = useMagnetic<HTMLButtonElement>(0.25, 16);
   const [showAssurance, setShowAssurance] = useState(false);
 

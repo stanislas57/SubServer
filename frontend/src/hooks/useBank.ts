@@ -51,7 +51,11 @@ export function useDetectSubscriptions() {
   return useMutation({ mutationFn: bankService.detectSubscriptions });
 }
 
-/** Indicateurs de réassurance page Banque : établissement, dernière synchro, volume. */
-export function useBankStatus() {
-  return useQuery({ queryKey: ["bank", "status"], queryFn: bankService.getStatus });
+/** Indicateurs de réassurance page Banque : établissement, dernière synchro, volume.
+ * `enabled` par défaut à true pour ne rien casser côté appelants existants,
+ * mais BankConnectPage le passe à false tant qu'aucune banque n'est
+ * connectée (l'UI qui consomme ces données ne s'affiche de toute façon pas
+ * avant ça) pour éviter un GET /bank/status inutile à chaque visite. */
+export function useBankStatus(enabled = true) {
+  return useQuery({ queryKey: ["bank", "status"], queryFn: bankService.getStatus, enabled });
 }

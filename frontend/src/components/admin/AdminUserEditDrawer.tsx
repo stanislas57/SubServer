@@ -27,12 +27,18 @@ export function AdminUserEditDrawer({ user, onOpenChange }: AdminUserEditDrawerP
   const [email, setEmail] = React.useState("");
   const [firstName, setFirstName] = React.useState("");
 
+  // Dépend de l'id, pas de la référence `user` : un toggle Premium/Admin
+  // invalide ["admin","users"] et renvoie un nouvel objet `user` (même id)
+  // -- se resynchroniser sur [user] écraserait la saisie Email/Prénom en
+  // cours si l'admin tape pendant que ce refetch arrive.
+  const userId = user?.id;
   React.useEffect(() => {
     if (user) {
       setEmail(user.email);
       setFirstName(user.first_name);
     }
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   const updateUser = useAdminUpdateUser();
   const subscriptionsQuery = useAdminUserSubscriptions(user?.id);

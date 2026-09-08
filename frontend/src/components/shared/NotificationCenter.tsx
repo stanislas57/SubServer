@@ -68,12 +68,17 @@ export function NotificationCenter({ triggerClassName }: NotificationCenterProps
   const alerts = renewalAlerts ?? [];
   const unreadCount = alerts.filter((a) => !a.is_read).length;
 
-  function handleOpen() {
+  async function handleOpen() {
     const next = !open;
     setOpen(next);
     if (next) {
-      for (const alert of alerts) {
-        if (!alert.is_read) markRead.mutate(alert.id);
+      // mutateAsync + Promise.allSettled plutôt qu'un .mutate() par alerte :
+      // chaque mutation réussie invalidait indépendamment ["notifications"],
+      // déclenchant potentiellement N GET /notifications en cascade au lieu
+      // d'un seul une fois toutes les alertes marquées lues.
+      const unread = alerts.filter((a) => !a.is_read);
+      if (unread.length > 0) {
+        await Promise.allSettled(unread.map((a) => markRead.mutateAsync(a.id)));
       }
     }
   }
