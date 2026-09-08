@@ -14,7 +14,7 @@ le lendemain sans jamais produire de second email pour le même cycle.
 import logging
 from datetime import date, datetime, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.email_service import send_renewal_alert_email
 from app.core.renewal import next_renewal_date
@@ -32,7 +32,32 @@ def generate_and_send_renewal_alerts(db: Session, *, today: date | None = None) 
     # (essais, doublons) côté client -- les alertes de renouvellement
     # respectent la même coupure globale plutôt que d'ajouter un second
     # interrupteur que l'utilisateur devrait découvrir séparément.
-    users = db.query(User).filter(User.notification_pref != "none").all()
+    # selectinload évite un aller-retour DB par utilisateur pour
+    # user.subscriptions (lazy par défaut) -- 1 requête pour tous les users +
+    # 1 pour toutes leurs subscriptions plutôt que N.
+    users = (
+        db.query(User)
+        .filter(User.notification_pref != "none")
+        .options(selectinload(User.subscriptions))
+        .all()
+    )
+
+    # Alertes déjà créées, chargées une seule fois pour toutes les
+    # subscriptions du batch plutôt qu'une requête de dédup par subscription
+    # (N+1) -- chaque (subscription_id, renewal_date) n'est de toute façon
+    # généré qu'une fois par exécution, donc ce snapshot pris avant la boucle
+    # reste valide pendant toute la durée du job.
+    all_sub_ids = [sub.id for user in users for sub in user.subscriptions]
+    existing_alerts = (
+        {
+            (a.subscription_id, a.renewal_date)
+            for a in db.query(RenewalAlert.subscription_id, RenewalAlert.renewal_date).filter(
+                RenewalAlert.subscription_id.in_(all_sub_ids)
+            )
+        }
+        if all_sub_ids
+        else set()
+    )
 
     for user in users:
         for sub in user.subscriptions:
@@ -42,12 +67,7 @@ def generate_and_send_renewal_alerts(db: Session, *, today: date | None = None) 
                 continue
 
             renewal_date_iso = renewal_date.isoformat()
-            already_exists = (
-                db.query(RenewalAlert)
-                .filter(RenewalAlert.subscription_id == sub.id, RenewalAlert.renewal_date == renewal_date_iso)
-                .first()
-            )
-            if already_exists:
+            if (sub.id, renewal_date_iso) in existing_alerts:
                 continue
 
             alert = RenewalAlert(

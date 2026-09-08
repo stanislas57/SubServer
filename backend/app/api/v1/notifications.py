@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
@@ -30,6 +30,7 @@ def list_notifications(current_user: User = Depends(get_current_user), db: Sessi
     tant qu'elles ne sont pas lues/dismissées, les plus récentes d'abord."""
     alerts = (
         db.query(RenewalAlert)
+        .options(joinedload(RenewalAlert.subscription))
         .filter(RenewalAlert.user_id == current_user.id, RenewalAlert.status != "dismissed")
         .order_by(RenewalAlert.created_at.desc())
         .all()

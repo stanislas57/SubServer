@@ -177,9 +177,20 @@ def _compute_all_owed(db: Session, user_id: str, members: list[FamilyMember]) ->
     shared_subscriptions = (
         db.query(Subscription).filter(Subscription.user_id == user_id, Subscription.is_shared.is_(True)).all()
     )
+    # Une requête pour tous les splits plutôt qu'une par abonnement partagé
+    # (N+1) -- regroupés en mémoire par subscription_id.
+    sub_ids = [s.id for s in shared_subscriptions]
+    splits_by_sub: dict[str, list[SubscriptionSplit]] = {}
+    if sub_ids:
+        all_splits = (
+            db.query(SubscriptionSplit).filter(SubscriptionSplit.subscription_id.in_(sub_ids)).all()
+        )
+        for split in all_splits:
+            splits_by_sub.setdefault(split.subscription_id, []).append(split)
+
     owed: dict[str, float] = {m.id: 0.0 for m in members}
     for subscription in shared_subscriptions:
-        splits = db.query(SubscriptionSplit).filter(SubscriptionSplit.subscription_id == subscription.id).all()
+        splits = splits_by_sub.get(subscription.id, [])
         for member_id, amount in _compute_subscription_owed(subscription, splits, members).items():
             if member_id in owed:  # ignore une part orpheline (membre supprimé entre-temps)
                 owed[member_id] += amount
@@ -291,10 +302,18 @@ def remove_family_member(
     # Les SubscriptionSplit référençant ce membre sont supprimés en cascade
     # par la contrainte FK (ondelete="CASCADE") -- pas de nettoyage manuel
     # nécessaire ici, cohérent avec le reste du modèle de données.
-    db.query(FamilyMember).filter(
-        FamilyMember.id == member_id, FamilyMember.user_id == current_user.id, FamilyMember.is_owner.is_(False)
-    ).delete()
+    deleted = (
+        db.query(FamilyMember)
+        .filter(
+            FamilyMember.id == member_id,
+            FamilyMember.user_id == current_user.id,
+            FamilyMember.is_owner.is_(False),
+        )
+        .delete()
+    )
     db.commit()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Membre introuvable.")
     return None
 
 

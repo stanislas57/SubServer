@@ -79,8 +79,14 @@ def update_subscription(
 def delete_subscription(
     sub_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    db.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == current_user.id).delete()
+    deleted = (
+        db.query(Subscription)
+        .filter(Subscription.id == sub_id, Subscription.user_id == current_user.id)
+        .delete()
+    )
     db.commit()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Abonnement introuvable.")
     return None
 
 
