@@ -5,7 +5,7 @@ Gestionnaire d'abonnements : abonnement partagé, comparateur d'offres (base cur
 - **Frontend** : React 19 + Vite + TypeScript + Tailwind + React Query + Framer Motion - `frontend/`
 - **Backend** : FastAPI + SQLAlchemy + Alembic + PostgreSQL - `backend/`
 
-**Déployé** : https://subsaver-frontend.onrender.com (API : https://subsaver-urna.onrender.com)
+**Déployé** : https://subsaver.fr (API : https://subserver-urna.onrender.com)
 
 ---
 
@@ -152,6 +152,45 @@ backend/
     ├── models/             user, subscription, family_member, bank_transaction, market_offer
     └── api/v1/             auth, users, subscriptions, bank, market, family
 ```
+
+---
+
+## Déploiement (Render)
+
+| Service | Root Directory | Build Command | Start / Publish |
+|---|---|---|---|
+| Frontend (Static Site) | `frontend` | `npm install && npm run build` | Publish directory : `dist` |
+| Backend (Web Service) | `backend` | `pip install -r requirements.txt` | Start Command : `./start.sh` |
+
+`backend/start.sh` applique les migrations Alembic puis démarre uvicorn sur
+`0.0.0.0:$PORT`. Un échec de migration n'empêche PAS l'API de démarrer :
+mieux vaut une API qui répond et qu'on peut diagnostiquer qu'une boucle de
+crash qui met tout le site hors ligne.
+
+**Health checks** :
+
+| Route | Rôle |
+|---|---|
+| `GET /health` | Sonde de l'hébergeur. Ne touche pas la base (sinon une base momentanément injoignable ferait tuer une instance saine). |
+| `GET /health/db` | Diagnostic : `200 {"database":"ok"}` ou `503 {"database":"unreachable"}`. |
+
+**Variables d'environnement obligatoires côté backend Render** :
+`ENVIRONMENT=production`, `DATABASE_URL`, `SECRET_KEY` (32 caractères minimum),
+`CORS_ORIGINS` (liste JSON contenant l'origine réelle du frontend, ex.
+`["https://subsaver.fr","https://www.subsaver.fr"]`).
+
+`DATABASE_URL` peut être collée telle quelle depuis le dashboard Render :
+le préfixe `postgres://` est normalisé vers `postgresql+psycopg2://` au
+démarrage (cf. `app/db/session.py`).
+
+### Si l'API est hors ligne ("Exited with status 1")
+
+1. Render -> le service backend -> onglet **Logs**, chercher la dernière
+   traceback avant l'arrêt : elle nomme la cause exacte.
+2. `curl https://subserver-urna.onrender.com/health` -> l'API démarre-t-elle ?
+3. `curl https://subserver-urna.onrender.com/health/db` -> la base est-elle
+   joignable ? Une base Postgres du plan gratuit **expire au bout de 30 jours** :
+   vérifier sa date d'expiration dans le dashboard.
 
 ---
 

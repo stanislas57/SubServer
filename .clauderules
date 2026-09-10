@@ -55,4 +55,7 @@ src/
 
 ## Déploiement (Render)
 - Frontend : Root Directory = `frontend`, Build = `npm install && npm run build`, Publish = `dist`
-- Backend : Root Directory = `backend`, Runtime = Python 3.11+
+- Backend : Root Directory = `backend`, Runtime = Python 3.11+, Start Command = `./start.sh`
+- Le backend doit TOUJOURS pouvoir démarrer : aucune exception au boot (scheduler,
+  migration, base injoignable) ne doit remonter jusqu'à uvicorn, sinon le process
+  sort en status 1 et tout le site tombe. Diagnostiquer via `/health` et `/health/db`.

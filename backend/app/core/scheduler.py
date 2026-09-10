@@ -25,20 +25,43 @@ def _run_renewal_alerts_job() -> None:
     try:
         count = generate_and_send_renewal_alerts(db)
         logger.info("Job alertes de renouvellement : %d alerte(s) créée(s).", count)
+    except Exception:
+        # Une base injoignable ou une migration en retard ne doit pas
+        # désarmer le job : APScheduler le relancera au prochain cycle.
+        logger.exception("Job alertes de renouvellement en échec.")
     finally:
         db.close()
 
 
 def start_scheduler() -> None:
+    """Ne propage JAMAIS d'exception : le scheduler est une commodité (un
+    email de rappel), l'API est le service. Une exception ici remonterait
+    dans le hook de démarrage FastAPI et tuerait le process au boot -- ce qui
+    ne se voit que comme un "Exited with status 1" chez l'hébergeur, avec
+    tout le site hors ligne pour une fonctionnalité annexe."""
     if scheduler.running:
         return
-    # 08:00 Europe/Paris : après l'heure de nuit, avant que l'utilisateur ne
-    # commence sa journée -- cohérent avec l'heure d'envoi des autres emails
-    # transactionnels de l'app (aucune contrainte technique particulière).
-    scheduler.add_job(_run_renewal_alerts_job, "cron", hour=8, minute=0, id="renewal_alerts_daily")
-    scheduler.start()
+    try:
+        # 08:00 Europe/Paris : après l'heure de nuit, avant que l'utilisateur ne
+        # commence sa journée -- cohérent avec l'heure d'envoi des autres emails
+        # transactionnels de l'app (aucune contrainte technique particulière).
+        scheduler.add_job(
+            _run_renewal_alerts_job,
+            "cron",
+            hour=8,
+            minute=0,
+            id="renewal_alerts_daily",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        scheduler.start()
+    except Exception:
+        logger.exception("Scheduler non démarré : les alertes de renouvellement ne seront pas envoyées.")
 
 
 def stop_scheduler() -> None:
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+    except Exception:
+        logger.exception("Arrêt du scheduler en échec (ignoré).")

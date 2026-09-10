@@ -3,12 +3,24 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.core.config import settings
-from app.db.session import Base
-from app.models import BankTransaction, FamilyMember, MarketOffer, Settlement, Subscription, SubscriptionSplit, User  # noqa: F401 - enregistre les modèles pour autogenerate
+from app.db.session import DATABASE_URL, Base
+from app.models import (  # noqa: F401 - enregistre les modèles pour autogenerate
+    BankTransaction,
+    FamilyMember,
+    MarketOffer,
+    RenewalAlert,
+    Settlement,
+    Subscription,
+    SubscriptionSplit,
+    User,
+)
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# DATABASE_URL (et non settings.DATABASE_URL) : l'URL est déjà normalisée vers
+# le driver psycopg2, cf. app/db/session.py. Le doublement des "%" est imposé
+# par ConfigParser, qui les interprète sinon comme une interpolation et fait
+# planter la migration sur un mot de passe contenant un %.
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

@@ -1,15 +1,18 @@
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.scheduler import start_scheduler, stop_scheduler
+from app.db.session import engine
 
 # Sans ceci, un logger applicatif (logger = logging.getLogger(__name__)) reste
 # muet en dessous de WARNING : le root logger n'a par défaut aucun handler
@@ -20,7 +23,25 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=settings.PROJECT_NAME)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Rien de ce qui se passe au démarrage ne doit pouvoir empêcher l'API de
+    servir : une exception levée ici fait sortir uvicorn en status 1 et met
+    tout le site hors ligne (le frontend n'a plus d'API du tout). On loggue
+    et on continue -- /health/db reste là pour diagnostiquer."""
+    try:
+        start_scheduler()
+    except Exception:
+        logger.exception("Démarrage du scheduler en échec (API démarrée quand même).")
+    yield
+    try:
+        stop_scheduler()
+    except Exception:
+        logger.exception("Arrêt du scheduler en échec (ignoré).")
+
+
+app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 
 app.state.limiter = limiter
 
@@ -78,16 +99,6 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 
-@app.on_event("startup")
-def _on_startup() -> None:
-    start_scheduler()
-
-
-@app.on_event("shutdown")
-def _on_shutdown() -> None:
-    stop_scheduler()
-
-
 @app.get("/")
 def root():
     return {"message": "Bienvenue sur SubSaver!", "status": "online"}
@@ -95,4 +106,22 @@ def root():
 
 @app.get("/health")
 def health():
+    """Volontairement SANS accès base : c'est la sonde de l'hébergeur. Si elle
+    dépendait de Postgres, une base momentanément injoignable ferait
+    redéployer/tuer une instance par ailleurs saine. Pour tester la base,
+    cf. /health/db."""
     return {"status": "ok"}
+
+
+@app.get("/health/db")
+def health_db():
+    """Diagnostic de connexion à la base : renvoie 200 {"database": "ok"} ou
+    503 avec le TYPE d'erreur SQLAlchemy (jamais le message brut, qui
+    contient l'hôte et l'utilisateur de connexion)."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        logger.exception("Health check base de données en échec.")
+        return JSONResponse(status_code=503, content={"database": "unreachable", "error": type(exc).__name__})
+    return {"database": "ok"}
