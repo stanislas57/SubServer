@@ -162,10 +162,17 @@ backend/
 | Frontend (Static Site) | `frontend` | `npm install && npm run build` | Publish directory : `dist` |
 | Backend (Web Service) | `backend` | `pip install -r requirements.txt` | Start Command : `./start.sh` |
 
-`backend/start.sh` applique les migrations Alembic puis démarre uvicorn sur
+`backend/start.sh` applique les migrations Alembic (`alembic upgrade head`),
+lance un diagnostic `scripts/verify_db.py`, puis démarre uvicorn sur
 `0.0.0.0:$PORT`. Un échec de migration n'empêche PAS l'API de démarrer :
 mieux vaut une API qui répond et qu'on peut diagnostiquer qu'une boucle de
 crash qui met tout le site hors ligne.
+
+> **Les migrations tournent dans le Start Command, jamais dans le Build
+> Command.** Un `alembic upgrade head` placé dans le Build fait échouer tout
+> le déploiement (`==> Build failed`) au moindre souci de base -- exactement
+> le symptôme d'une base expirée. Build Command = `pip install -r requirements.txt`
+> et rien d'autre.
 
 **Health checks** :
 
@@ -179,18 +186,41 @@ crash qui met tout le site hors ligne.
 `CORS_ORIGINS` (liste JSON contenant l'origine réelle du frontend, ex.
 `["https://subsaver.fr","https://www.subsaver.fr"]`).
 
-`DATABASE_URL` peut être collée telle quelle depuis le dashboard Render :
-le préfixe `postgres://` est normalisé vers `postgresql+psycopg2://` au
-démarrage (cf. `app/db/session.py`).
+`DATABASE_URL` se colle **telle quelle** depuis le dashboard du fournisseur.
+`app/db/session.py` la normalise au démarrage : `postgres://` /
+`postgresql://` -> `postgresql+psycopg2://`, et `sslmode=require` ajouté si
+l'hôte l'impose (Neon, Supabase, Render).
 
-### Si l'API est hors ligne ("Exited with status 1")
+### Base de données : Neon (gratuit, permanent)
 
-1. Render -> le service backend -> onglet **Logs**, chercher la dernière
-   traceback avant l'arrêt : elle nomme la cause exacte.
-2. `curl https://subserver-urna.onrender.com/health` -> l'API démarre-t-elle ?
-3. `curl https://subserver-urna.onrender.com/health/db` -> la base est-elle
-   joignable ? Une base Postgres du plan gratuit **expire au bout de 30 jours** :
-   vérifier sa date d'expiration dans le dashboard.
+Le Postgres gratuit de Render est **supprimé 30 jours après sa création**.
+Pour une base gratuite qui ne disparaît pas, utiliser [Neon](https://neon.com) :
+
+1. Neon -> **New Project** -> région **Europe (Frankfurt)** (au plus près du
+   backend Render).
+2. **Connection Details** -> copier la connection string **"direct"** (celle
+   *sans* `-pooler` dans l'hôte).
+3. Render -> service backend -> **Environment** -> `DATABASE_URL` = cette
+   string -> **Save Changes**.
+4. Render -> **Manual Deploy -> Deploy latest commit**. `start.sh` crée tout
+   le schéma (`alembic upgrade head`) et peuple le catalogue d'offres via les
+   migrations de données.
+5. Vérifier : `curl .../health/db` -> `{"database":"ok"}`.
+
+La base Neon se met en veille après ~5 min d'inactivité et se réveille seule
+au premier appel (première requête un peu lente, `pool_pre_ping` gère la
+reconnexion).
+
+### Si l'API est hors ligne
+
+1. Render -> service backend -> onglet **Events**, ouvrir le dernier deploy :
+   la dernière traceback avant `==> Build failed` / `Exited with status 1`
+   nomme la cause.
+2. `could not translate host name "dpg-..."` / `Name or service not known` ->
+   la base **n'existe plus** (Render free supprimée après 30 j). Recréer la
+   base (Neon recommandé, cf. ci-dessus), mettre à jour `DATABASE_URL`.
+3. `curl https://subserver-urna.onrender.com/health` -> l'API démarre-t-elle ?
+4. `curl https://subserver-urna.onrender.com/health/db` -> la base répond-elle ?
 
 ---
 
